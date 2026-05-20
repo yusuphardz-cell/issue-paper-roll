@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BJK Paper Roll Tracker</title>
+    <script src="https://tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen p-4 font-sans">
+
+    <!-- Header -->
+    <header class="max-w-md mx-auto mb-6 bg-slate-800 p-4 rounded-2xl border border-slate-700 shadow-lg">
+        <h1 class="text-xl font-black text-amber-500 tracking-tight text-center">🧻 PAPER ROLL TRANSACTION</h1>
+        <p class="text-center text-[10px] text-slate-400 font-mono mt-1">Mobile Terminal v1.0 | Connected to SAP</p>
+    </header>
+
+    <!-- Main Form -->
+    <main class="max-w-md mx-auto space-y-4">
+        <div class="bg-slate-800 p-6 rounded-3xl border border-slate-700 shadow-xl space-y-4">
+            
+            <div>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">ID / Barcode Roll</label>
+                <input type="text" id="rollId" placeholder="Scan atau ketik ID Roll..." 
+                    class="w-full p-4 bg-slate-950 border border-slate-700 rounded-xl text-white font-mono uppercase focus:border-amber-500 outline-none">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Berat Pakai (Kg)</label>
+                <input type="number" id="weightUsed" placeholder="0.00" 
+                    class="w-full p-4 bg-slate-950 border border-slate-700 rounded-xl text-white font-mono focus:border-amber-500 outline-none">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">ID Mesin / Produksi</label>
+                <input type="text" id="machineId" placeholder="Contoh: MACHINE-01" 
+                    class="w-full p-4 bg-slate-950 border border-slate-700 rounded-xl text-white uppercase focus:border-amber-500 outline-none">
+            </div>
+
+            <button onclick="submitTransaction()" 
+                class="w-full bg-gradient-to-r from-amber-500 to-orange-600 text-slate-950 font-extrabold p-4 rounded-xl uppercase tracking-widest text-sm hover:opacity-90 active:scale-[0.98] transition-all shadow-lg shadow-orange-600/20">
+                Simpan & Posting ke SAP
+            </button>
+        </div>
+
+        <!-- Realtime Status Log -->
+        <div class="bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50">
+            <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Log Transaksi Terakhir</h3>
+            <div id="logStatus" class="text-xs font-mono text-slate-300 space-y-1 max-h-32 overflow-y-auto">
+                <span class="text-slate-500">[Sistem Ready] Menunggu input...</span>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const API_URL = 'http://localhost:3000/api/transaction'; // Ganti dengan IP server backend Anda
+
+        async function submitTransaction() {
+            const rollId = document.getElementById('rollId').value.trim();
+            const weightUsed = document.getElementById('weightUsed').value.trim();
+            const machineId = document.getElementById('machineId').value.trim();
+            const logBox = document.getElementById('logStatus');
+
+            if (!rollId || !weightUsed || !machineId) {
+                alert('Semua kolom wajib diisi!');
+                return;
+            }
+
+            logBox.innerHTML = `<span class="text-amber-400">[Proses] Mengirim data ke middleware...</span>`;
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rollId, weightUsed, machineId })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    logBox.innerHTML = `
+                        <span class="text-emerald-400">[Sukses] Supabase Saved!</span><br>
+                        <span class="text-blue-400">[SAP Status] Document: ${result.sap_doc || 'N/A'} - ${result.sap_message}</span>
+                    `;
+                    // Reset Form
+                    document.getElementById('rollId').value = '';
+                    document.getElementById('weightUsed').value = '';
+                } else {
+                    logBox.innerHTML = `<span class="text-rose-400">[Gagal] ${result.error || 'Terjadi kesalahan'}</span>`;
+                }
+            } catch (err) {
+                logBox.innerHTML = `<span class="text-rose-400">[Error] Tidak dapat terhubung ke server backend.</span>`;
+            }
+        }
+    </script>
+</body>
+</html>
