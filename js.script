@@ -1,0 +1,84 @@
+const express = require('express');
+const cors = require('cors');
+const { createClient } = require('@supabase/supabase-js');
+const axios = require('axios'); // Untuk menembak API SAP
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// Konfigurasi Supabase
+const supabase = createClient('https://PROJECT_ID.supabase.co', 'YOUR_ANON_KEY');
+
+// Konfigurasi Kredensial SAP (NetWeaver Gateway / OData Service)
+const SAP_API_URL = 'https://YOUR_SAP_HOST:PORT/sap/opu/odata/sap/ZPAPER_ROLL_SRV/GoodsMovementSet';
+const SAP_AUTH = Buffer.from('SAP_USER:SAP_PASSWORD').toString('base64');
+
+app.post('/api/transaction', async (req, res) => {
+    const { rollId, weightUsed, machineId } = req.body;
+
+    // LANGKAH 1: Simpan Cadangan Data ke Supabase (Lokal Web)
+    const { data: dbData, error: dbError } = await supabase
+        .from('paper_transactions')
+        .insert([{ roll_id: rollId, qty: parseFloat(weightUsed), machine: machineId, status: 'PENDING_SAP' }])
+        .select();
+
+    if (dbError) {
+        return res.status(500).json({ error: 'Gagal simpan ke database lokal: ' + dbError.message });
+    }
+
+    const txId = dbData[0].id;
+
+    // LANGKAH 2: Teruskan Transaksi ke SAP (Setara MIGO / MB11 Goods Issue)
+    // Payload disesuaikan dengan struktur RFC / BAPI_GOODSMVT_CREATE di SAP Anda
+    const sapPayload = {
+        Material: rollId,
+        Plant: "1000",          // Sesuaikan kode pabrik Anda
+        StgeLoc: "0001",        // Sesuaikan kode gudang Anda
+        MoveType: "261",        // 261 = Goods Issue untuk Order Produksi
+        EntryQuantity: weightUsed,
+        EntryUom: "KG",
+        Orderid: machineId      // Biasanya diisi nomor Production Order
+    };
+
+    try {
+        const sapResponse = await axios.post(SAP_API_URL, sapPayload, {
+            headers: {
+                'Authorization': `Basic ${SAP_AUTH}`,
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'X' // Proteksi CSRF SAP
+            }
+        });
+
+        // Ambil nomor dokumen sukses dari SAP
+        const sapDocNum = sapResponse.data.d.MaterialDoc; 
+
+        // LANGKAH 3: Update Status Sukses di Supabase
+        await supabase
+            .from('paper_transactions')
+            .update({ status: 'SUCCESS_SAP', sap_ref: sapDocNum })
+            .eq('id', txId);
+
+        return res.status(200).json({
+            status: 'Success',
+            sap_doc: sapDocNum,
+            sap_message: 'Material Document Berhasil Diterbitkan.'
+        });
+
+    } catch (sapError) {
+        // Jika SAP Gagal, data di Supabase tetap ada dengan status gagal untuk rekonsiliasi nanti
+        const errMsg = sapError.response ? JSON.stringify(sapError.response.data) : sapError.message;
+        
+        await supabase
+            .from('paper_transactions')
+            .update({ status: 'FAILED_SAP', error_log: errMsg })
+            .eq('id', txId);
+
+        return res.status(502).json({
+            error: 'Koneksi lokal berhasil, tapi SAP menolak kueri.',
+            sap_message: errMsg
+        });
+    }
+});
+
+app.listen(3000, () => console.log('Middleware server berjalan di port 3000'));
